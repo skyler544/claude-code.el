@@ -1950,6 +1950,67 @@ enter Claude commands."
        (claude-code-read-only-mode)
      (claude-code-exit-read-only-mode))))
 
+;;;; Prompt editing -- like `org-edit-special`
+(defvar-local claude-code--prompt-edit-source-buffer nil
+  "The Claude Code terminal buffer this prompt edit session targets.")
+
+(defvar-local claude-code--prompt-edit-window-config nil
+  "Window configuration saved before entering prompt edit mode.")
+
+;;;###autoload
+(defun claude-code--prompt-edit-finalize ()
+  "Send the prompt edit buffer contents to Claude and restore windows.
+
+Reads the full buffer text, kills the edit buffer, restores the saved
+window configuration, and sends the text to the Claude terminal."
+  (interactive)
+  (let ((content (buffer-substring-no-properties (point-min) (point-max)))
+        (source claude-code--prompt-edit-source-buffer)
+        (wconf claude-code--prompt-edit-window-config))
+    (kill-buffer (current-buffer))
+    (when wconf
+      (set-window-configuration wconf))
+    (when (and source (buffer-live-p source))
+      (with-current-buffer source
+        (claude-code--term-send-string claude-code-terminal-backend content)
+        (sit-for 0.1)
+        (claude-code--term-send-string claude-code-terminal-backend (kbd "RET"))))))
+
+;;;###autoload
+(defun claude-code--prompt-edit-abort ()
+  "Abort prompt editing and restore the previous window configuration."
+  (interactive)
+  (let ((wconf claude-code--prompt-edit-window-config))
+    (kill-buffer (current-buffer))
+    (when wconf
+      (set-window-configuration wconf))))
+
+;;;###autoload
+(defun claude-code-edit-prompt ()
+  "Open a temporary buffer to compose a Claude prompt with full Emacs editing.
+
+Opens a buffer where you can type and edit your prompt using normal
+Emacs keybindings (movement, transpose-chars, etc.).  When done, use
+\\[claude-code--prompt-edit-finalize] to send the prompt to Claude, or
+\\[claude-code--prompt-edit-abort] to cancel without sending.
+
+This is analogous to `org-edit-special': hit the keybinding in the
+Claude terminal window, compose your prompt, then confirm with `C-c C-c'."
+  (interactive)
+  (let ((source (current-buffer))
+        (wconf (current-window-configuration))
+        (edit-buf (get-buffer-create "*claude-code-prompt-edit*")))
+    (with-current-buffer edit-buf
+      (text-mode)
+      (setq-local claude-code--prompt-edit-source-buffer source)
+      (setq-local claude-code--prompt-edit-window-config wconf)
+      (setq-local header-line-format
+                  (substitute-command-keys
+                   "Claude prompt edit: \\`C-c C-c' to send, \\`C-c C-k' to cancel"))
+      (local-set-key (kbd "C-c C-c") #'claude-code--prompt-edit-finalize)
+      (local-set-key (kbd "C-c C-k") #'claude-code--prompt-edit-abort))
+    (pop-to-buffer edit-buf)))
+
 ;;;; Mode definition
 ;;;###autoload
 (define-minor-mode claude-code-mode
